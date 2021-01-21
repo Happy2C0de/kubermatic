@@ -171,7 +171,7 @@ func main() {
 			log.Fatalw("failed to build Seed validation handler", zap.Error(err))
 		}
 		h.SetupWebhookWithManager(mgr)
-		clustervalidation.NewAdmissionHandler(runOpts.featureGates).SetupWebhookWithManager(mgr)
+		clustervalidation.NewAdmissionHandler(nil, runOpts.featureGates).SetupWebhookWithManager(mgr)
 	} else {
 		log.Info("the validatingAdmissionWebhook server can not be started because seed-admissionwebhook-cert-file and seed-admissionwebhook-key-file are empty")
 	}
