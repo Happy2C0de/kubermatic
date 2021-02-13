@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"testing"
 
+	openstack "github.com/kubermatic/machine-controller/pkg/cloudprovider/provider/openstack/types"
 	vsphere "github.com/kubermatic/machine-controller/pkg/cloudprovider/provider/vsphere/types"
 	kubermaticv1 "k8c.io/kubermatic/v2/pkg/crd/kubermatic/v1"
 	"k8c.io/kubermatic/v2/pkg/resources"
+	"k8s.io/utils/pointer"
 )
 
 func TestGetVsphereCloudConfig(t *testing.T) {
@@ -111,6 +113,53 @@ func TestGetVsphereCloudConfig(t *testing.T) {
 		tc := testCases[idx]
 		t.Run(tc.name, func(t *testing.T) {
 			cloudConfig, err := getVsphereCloudConfig(tc.cluster, tc.dc, resources.Credentials{})
+			if err != nil {
+				t.Fatalf("Error trying to get cloudconfig: %v", err)
+			}
+			if err := tc.verify(cloudConfig); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+func TestGetOpenstackCloudConfig(t *testing.T) {
+	testCases := []struct {
+		name     string
+		cluster  *kubermaticv1.Cluster
+		dc       *kubermaticv1.Datacenter
+		provider string
+		verify   func(*openstack.CloudConfig) error
+	}{
+		{
+			name: "Openstack explicitly set ManageSecurityGroups",
+			cluster: &kubermaticv1.Cluster{
+				Spec: kubermaticv1.ClusterSpec{
+					Cloud: kubermaticv1.CloudSpec{
+						Openstack: &kubermaticv1.OpenstackCloudSpec{},
+					},
+				},
+			},
+			dc: &kubermaticv1.Datacenter{
+				Spec: kubermaticv1.DatacenterSpec{
+					Openstack: &kubermaticv1.DatacenterSpecOpenstack{
+						ManageSecurityGroups: pointer.BoolPtr(true),
+					},
+				},
+			},
+			verify: func(cc *openstack.CloudConfig) error {
+				if !cc.LoadBalancer.ManageSecurityGroups {
+					return fmt.Errorf("Expected ManageSecurityGroups to be %t, was %t", true, cc.LoadBalancer.ManageSecurityGroups)
+				}
+				return nil
+			},
+		},
+	}
+
+	for idx := range testCases {
+		tc := testCases[idx]
+		t.Run(tc.name, func(t *testing.T) {
+			cloudConfig, err := getOpenstackCloudConfig(tc.cluster, tc.dc, resources.Credentials{})
 			if err != nil {
 				t.Fatalf("Error trying to get cloudconfig: %v", err)
 			}

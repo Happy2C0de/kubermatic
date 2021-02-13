@@ -80,79 +80,38 @@ func CloudConfig(
 	dc *kubermaticv1.Datacenter,
 	credentials resources.Credentials,
 ) (cloudConfig string, err error) {
-	cloud := cluster.Spec.Cloud
 	switch {
-	case cloud.AWS != nil:
-		awsCloudConfig := &aws.CloudConfig{
-			// Dummy AZ, so that K8S can extract the region from it.
-			// https://github.com/kubernetes/kubernetes/blob/v1.15.0/staging/src/k8s.io/legacy-cloud-providers/aws/aws.go#L1199
-			// https://github.com/kubernetes/kubernetes/blob/v1.15.0/staging/src/k8s.io/legacy-cloud-providers/aws/aws.go#L1174
-			Global: aws.GlobalOpts{
-				Zone:                        dc.Spec.AWS.Region + "x",
-				VPC:                         cloud.AWS.VPCID,
-				KubernetesClusterID:         cluster.Name,
-				DisableSecurityGroupIngress: false,
-				RouteTableID:                cloud.AWS.RouteTableID,
-				DisableStrictZoneCheck:      true,
-				RoleARN:                     cloud.AWS.ControlPlaneRoleARN,
-			},
+	case cluster.Spec.Cloud.AWS != nil:
+		awsCloudConfig, err := getAWSCloudConfig(cluster, dc, credentials)
+		if err != nil {
+			return cloudConfig, err
 		}
 		cloudConfig, err = aws.CloudConfigToString(awsCloudConfig)
 		if err != nil {
 			return cloudConfig, err
 		}
 
-	case cloud.Azure != nil:
-		azureCloudConfig := &azure.CloudConfig{
-			Cloud:                      "AZUREPUBLICCLOUD",
-			TenantID:                   credentials.Azure.TenantID,
-			SubscriptionID:             credentials.Azure.SubscriptionID,
-			AADClientID:                credentials.Azure.ClientID,
-			AADClientSecret:            credentials.Azure.ClientSecret,
-			ResourceGroup:              cloud.Azure.ResourceGroup,
-			Location:                   dc.Spec.Azure.Location,
-			VNetName:                   cloud.Azure.VNetName,
-			SubnetName:                 cloud.Azure.SubnetName,
-			RouteTableName:             cloud.Azure.RouteTableName,
-			SecurityGroupName:          cloud.Azure.SecurityGroup,
-			PrimaryAvailabilitySetName: cloud.Azure.AvailabilitySet,
-			VnetResourceGroup:          cloud.Azure.ResourceGroup,
-			UseInstanceMetadata:        false,
+	case cluster.Spec.Cloud.Azure != nil:
+		azureCloudConfig, err := getAzureCloudConfig(cluster, dc, credentials)
+		if err != nil {
+			return cloudConfig, err
 		}
 		cloudConfig, err = azure.CloudConfigToString(azureCloudConfig)
 		if err != nil {
 			return cloudConfig, err
 		}
 
-	case cloud.Openstack != nil:
-		manageSecurityGroups := dc.Spec.Openstack.ManageSecurityGroups
-		trustDevicePath := dc.Spec.Openstack.TrustDevicePath
-		openstackCloudConfig := &openstack.CloudConfig{
-			Global: openstack.GlobalOpts{
-				AuthURL:    dc.Spec.Openstack.AuthURL,
-				Username:   credentials.Openstack.Username,
-				Password:   credentials.Openstack.Password,
-				DomainName: credentials.Openstack.Domain,
-				TenantName: credentials.Openstack.Tenant,
-				TenantID:   credentials.Openstack.TenantID,
-				Region:     dc.Spec.Openstack.Region,
-			},
-			BlockStorage: openstack.BlockStorageOpts{
-				BSVersion:       "auto",
-				TrustDevicePath: trustDevicePath != nil && *trustDevicePath,
-				IgnoreVolumeAZ:  dc.Spec.Openstack.IgnoreVolumeAZ,
-			},
-			LoadBalancer: openstack.LoadBalancerOpts{
-				ManageSecurityGroups: manageSecurityGroups == nil || *manageSecurityGroups,
-			},
-			Version: cluster.Spec.Version.String(),
+	case cluster.Spec.Cloud.Openstack != nil:
+		openstackCloudConfig, err := getOpenstackCloudConfig(cluster, dc, credentials)
+		if err != nil {
+			return cloudConfig, err
 		}
 		cloudConfig, err = openstack.CloudConfigToString(openstackCloudConfig)
 		if err != nil {
 			return cloudConfig, err
 		}
 
-	case cloud.VSphere != nil:
+	case cluster.Spec.Cloud.VSphere != nil:
 		vsphereCloudConfig, err := getVsphereCloudConfig(cluster, dc, credentials)
 		if err != nil {
 			return cloudConfig, err
@@ -162,61 +121,10 @@ func CloudConfig(
 			return cloudConfig, err
 		}
 
-	case cloud.GCP != nil:
-		b, err := base64.StdEncoding.DecodeString(credentials.GCP.ServiceAccount)
+	case cluster.Spec.Cloud.GCP != nil:
+		gcpCloudConfig, err := getGCPCloudConfig(cluster, dc, credentials)
 		if err != nil {
-			return "", fmt.Errorf("error decoding service account: %v", err)
-		}
-		sam := map[string]string{}
-		err = json.Unmarshal(b, &sam)
-		if err != nil {
-			return "", fmt.Errorf("failed unmarshaling service account: %v", err)
-		}
-		projectID := sam["project_id"]
-		if projectID == "" {
-			return "", errors.New("empty project_id")
-		}
-
-		tag := fmt.Sprintf("kubernetes-cluster-%s", cluster.Name)
-		localZone := dc.Spec.GCP.Region + "-" + dc.Spec.GCP.ZoneSuffixes[0]
-
-		// By default, all GCP clusters are assumed to be the in the same zone. If the control plane
-		// and worker nodes are not it the same zone (localZone), the GCP cloud controller fails
-		// to find nodes that are not in the localZone: https://github.com/kubermatic/kubermatic/issues/5025
-		// to avoid this, we should enable multizone or regional configuration.
-		// It's not easily possible to access the MachineDeployment object from here to compare
-		// localZone with the user cluster zone. Additionally, ZoneSuffixes are not used
-		// to limit available zones for the user. So, we will just enable multizone support as a workaround.
-
-		// FIXME: Compare localZone to MachineDeployment.Zone and set multizone to true
-		// when they differ, or if len(dc.Spec.GCP.ZoneSuffixes) > 1
-		multizone := true
-
-		if cloud.GCP.Network == "" || cloud.GCP.Network == gcp.DefaultNetwork {
-			// NetworkName is used by the gce cloud provider to populate the provider's NetworkURL.
-			// This value can be provided in the config as a name or a url. Internally,
-			// the gce cloud provider checks it and if it's a name, it will infer the URL from it.
-			// However, if the name has a '/', the provider assumes it's a URL and uses it as is.
-			// This breaks routes cleanup since the routes are matched against the URL,
-			// which would be incorrect in this case.
-			// On the provider side, the "global/networks/default" format is the valid
-			// one since it's used internally for firewall rules and and network interfaces,
-			// so it has to be kept this way.
-			// tl;dr: use "default" or a full network URL, not "global/networks/default"
-			cloud.GCP.Network = "default"
-		}
-
-		gcpCloudConfig := &gce.CloudConfig{
-			Global: gce.GlobalOpts{
-				ProjectID:      projectID,
-				LocalZone:      localZone,
-				MultiZone:      multizone,
-				Regional:       dc.Spec.GCP.Regional,
-				NetworkName:    cloud.GCP.Network,
-				SubnetworkName: cloud.GCP.Subnetwork,
-				TokenURL:       "nil",
-				NodeTags:       []string{tag},
-			},
+			return cloudConfig, err
 		}
 		cloudConfig, err = gcpCloudConfig.AsString()
 		if err != nil {
@@ -225,6 +133,80 @@ func CloudConfig(
 	}
 
 	return cloudConfig, err
+}
+
+// getPROVIDERCloudConfig functions
+func getAWSCloudConfig(
+	cluster *kubermaticv1.Cluster,
+	dc *kubermaticv1.Datacenter,
+	credentials resources.Credentials,
+) (*aws.CloudConfig, error) {
+	return &aws.CloudConfig{
+		// Dummy AZ, so that K8S can extract the region from it.
+		// https://github.com/kubernetes/kubernetes/blob/v1.15.0/staging/src/k8s.io/legacy-cloud-providers/aws/aws.go#L1199
+		// https://github.com/kubernetes/kubernetes/blob/v1.15.0/staging/src/k8s.io/legacy-cloud-providers/aws/aws.go#L1174
+		Global: aws.GlobalOpts{
+			Zone:                        dc.Spec.AWS.Region + "x",
+			VPC:                         cluster.Spec.Cloud.AWS.VPCID,
+			KubernetesClusterID:         cluster.Name,
+			DisableSecurityGroupIngress: false,
+			RouteTableID:                cluster.Spec.Cloud.AWS.RouteTableID,
+			DisableStrictZoneCheck:      true,
+			RoleARN:                     cluster.Spec.Cloud.AWS.ControlPlaneRoleARN,
+		},
+	}, nil
+}
+
+func getAzureCloudConfig(
+	cluster *kubermaticv1.Cluster,
+	dc *kubermaticv1.Datacenter,
+	credentials resources.Credentials,
+) (*azure.CloudConfig, error) {
+	return &azure.CloudConfig{
+		Cloud:                      "AZUREPUBLICCLOUD",
+		TenantID:                   credentials.Azure.TenantID,
+		SubscriptionID:             credentials.Azure.SubscriptionID,
+		AADClientID:                credentials.Azure.ClientID,
+		AADClientSecret:            credentials.Azure.ClientSecret,
+		ResourceGroup:              cluster.Spec.Cloud.Azure.ResourceGroup,
+		Location:                   dc.Spec.Azure.Location,
+		VNetName:                   cluster.Spec.Cloud.Azure.VNetName,
+		SubnetName:                 cluster.Spec.Cloud.Azure.SubnetName,
+		RouteTableName:             cluster.Spec.Cloud.Azure.RouteTableName,
+		SecurityGroupName:          cluster.Spec.Cloud.Azure.SecurityGroup,
+		PrimaryAvailabilitySetName: cluster.Spec.Cloud.Azure.AvailabilitySet,
+		VnetResourceGroup:          cluster.Spec.Cloud.Azure.ResourceGroup,
+		UseInstanceMetadata:        false,
+	}, nil
+}
+
+func getOpenstackCloudConfig(
+	cluster *kubermaticv1.Cluster,
+	dc *kubermaticv1.Datacenter,
+	credentials resources.Credentials,
+) (*openstack.CloudConfig, error) {
+	manageSecurityGroups := dc.Spec.Openstack.ManageSecurityGroups
+	trustDevicePath := dc.Spec.Openstack.TrustDevicePath
+	return &openstack.CloudConfig{
+		Global: openstack.GlobalOpts{
+			AuthURL:    dc.Spec.Openstack.AuthURL,
+			Username:   credentials.Openstack.Username,
+			Password:   credentials.Openstack.Password,
+			DomainName: credentials.Openstack.Domain,
+			TenantName: credentials.Openstack.Tenant,
+			TenantID:   credentials.Openstack.TenantID,
+			Region:     dc.Spec.Openstack.Region,
+		},
+		BlockStorage: openstack.BlockStorageOpts{
+			BSVersion:       "auto",
+			TrustDevicePath: trustDevicePath != nil && *trustDevicePath,
+			IgnoreVolumeAZ:  dc.Spec.Openstack.IgnoreVolumeAZ,
+		},
+		LoadBalancer: openstack.LoadBalancerOpts{
+			ManageSecurityGroups: manageSecurityGroups == nil || *manageSecurityGroups,
+		},
+		Version: cluster.Spec.Version.String(),
+	}, nil
 }
 
 func getVsphereCloudConfig(
@@ -273,6 +255,68 @@ func getVsphereCloudConfig(
 		},
 		Disk: vsphere.DiskOpts{
 			SCSIControllerType: "pvscsi",
+		},
+	}, nil
+}
+
+func getGCPCloudConfig(
+	cluster *kubermaticv1.Cluster,
+	dc *kubermaticv1.Datacenter,
+	credentials resources.Credentials,
+) (*gce.CloudConfig, error) {
+	b, err := base64.StdEncoding.DecodeString(credentials.GCP.ServiceAccount)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding service account: %v", err)
+	}
+	sam := map[string]string{}
+	err = json.Unmarshal(b, &sam)
+	if err != nil {
+		return nil, fmt.Errorf("failed unmarshaling service account: %v", err)
+	}
+	projectID := sam["project_id"]
+	if projectID == "" {
+		return nil, errors.New("empty project_id")
+	}
+
+	tag := fmt.Sprintf("kubernetes-cluster-%s", cluster.Name)
+	localZone := dc.Spec.GCP.Region + "-" + dc.Spec.GCP.ZoneSuffixes[0]
+
+	// By default, all GCP clusters are assumed to be the in the same zone. If the control plane
+	// and worker nodes are not it the same zone (localZone), the GCP cloud controller fails
+	// to find nodes that are not in the localZone: https://github.com/kubermatic/kubermatic/issues/5025
+	// to avoid this, we should enable multizone or regional configuration.
+	// It's not easily possible to access the MachineDeployment object from here to compare
+	// localZone with the user cluster zone. Additionally, ZoneSuffixes are not used
+	// to limit available zones for the user. So, we will just enable multizone support as a workaround.
+
+	// FIXME: Compare localZone to MachineDeployment.Zone and set multizone to true
+	// when they differ, or if len(dc.Spec.GCP.ZoneSuffixes) > 1
+	multizone := true
+
+	if cluster.Spec.Cloud.GCP.Network == "" || cluster.Spec.Cloud.GCP.Network == gcp.DefaultNetwork {
+		// NetworkName is used by the gce cloud provider to populate the provider's NetworkURL.
+		// This value can be provided in the config as a name or a url. Internally,
+		// the gce cloud provider checks it and if it's a name, it will infer the URL from it.
+		// However, if the name has a '/', the provider assumes it's a URL and uses it as is.
+		// This breaks routes cleanup since the routes are matched against the URL,
+		// which would be incorrect in this case.
+		// On the provider side, the "global/networks/default" format is the valid
+		// one since it's used internally for firewall rules and and network interfaces,
+		// so it has to be kept this way.
+		// tl;dr: use "default" or a full network URL, not "global/networks/default"
+		cluster.Spec.Cloud.GCP.Network = "default"
+	}
+
+	return &gce.CloudConfig{
+		Global: gce.GlobalOpts{
+			ProjectID:      projectID,
+			LocalZone:      localZone,
+			MultiZone:      multizone,
+			Regional:       dc.Spec.GCP.Regional,
+			NetworkName:    cluster.Spec.Cloud.GCP.Network,
+			SubnetworkName: cluster.Spec.Cloud.GCP.Subnetwork,
+			TokenURL:       "nil",
+			NodeTags:       []string{tag},
 		},
 	}, nil
 }
