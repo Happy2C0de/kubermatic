@@ -7022,6 +7022,16 @@
           },
           {
             "type": "string",
+            "name": "ApplicationCredentialID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialSecret",
+            "in": "header"
+          },
+          {
+            "type": "string",
             "name": "DatacenterName",
             "in": "header"
           },
@@ -7084,6 +7094,16 @@
           {
             "type": "string",
             "name": "TenantID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialSecret",
             "in": "header"
           },
           {
@@ -7154,6 +7174,16 @@
           },
           {
             "type": "string",
+            "name": "ApplicationCredentialID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialSecret",
+            "in": "header"
+          },
+          {
+            "type": "string",
             "name": "DatacenterName",
             "in": "header"
           },
@@ -7216,6 +7246,16 @@
           {
             "type": "string",
             "name": "TenantID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialSecret",
             "in": "header"
           },
           {
@@ -7286,6 +7326,16 @@
           },
           {
             "type": "string",
+            "name": "ApplicationCredentialID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialSecret",
+            "in": "header"
+          },
+          {
+            "type": "string",
             "name": "DatacenterName",
             "in": "header"
           },
@@ -7339,6 +7389,16 @@
           {
             "type": "string",
             "name": "Password",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialID",
+            "in": "header"
+          },
+          {
+            "type": "string",
+            "name": "ApplicationCredentialSecret",
             "in": "header"
           },
           {
@@ -17192,6 +17252,14 @@
       "type": "object",
       "title": "OpenstackCloudSpec specifies access data to an OpenStack cloud.",
       "properties": {
+        "applicationCredentialID": {
+          "type": "string",
+          "x-go-name": "ApplicationCredentialID"
+        },
+        "applicationCredentialSecret": {
+          "type": "string",
+          "x-go-name": "ApplicationCredentialSecret"
+        },
         "credentialsReference": {
           "$ref": "#/definitions/GlobalSecretKeySelector"
         },

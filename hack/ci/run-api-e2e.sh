@@ -102,6 +102,8 @@ spec:
     password: ${OS_PASSWORD}
     tenant: ${OS_TENANT_NAME}
     domain: ${OS_DOMAIN}
+    application_credential_id: ${OS_APPLICATION_CREDENTIAL_ID}
+    application_credential_secret: ${OS_APPLICATION_CREDENTIAL_SECRET}
 EOF
 retry 2 kubectl apply -f preset-openstack.yaml
 

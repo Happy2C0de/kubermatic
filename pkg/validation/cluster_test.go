@@ -102,6 +102,21 @@ func TestValidateCloudSpec(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "valid openstack spec - application credentials specified",
+			err:  nil,
+			spec: kubermaticv1.CloudSpec{
+				DatacenterName: "some-datacenter",
+				Openstack: &kubermaticv1.OpenstackCloudSpec{
+					TenantID:                    "some-tenant",
+					ApplicationCredentialID:     "some-appCredID",
+					ApplicationCredentialSecret: "some-appCredSecret",
+					Domain:                      "some-domain",
+					// Required due to the above defined DC
+					FloatingIPPool: "some-network",
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {

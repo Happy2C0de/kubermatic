@@ -302,6 +302,16 @@ func validateOpenStackCloudSpec(spec *kubermaticv1.OpenstackCloudSpec, dc *kuber
 			return err
 		}
 	}
+	if spec.ApplicationCredentialID == "" {
+		if err := kuberneteshelper.ValidateSecretKeySelector(spec.CredentialsReference, resources.OpenstackApplicationCredentialID); err != nil {
+			return err
+		}
+	}
+	if spec.ApplicationCredentialSecret == "" {
+		if err := kuberneteshelper.ValidateSecretKeySelector(spec.CredentialsReference, resources.OpenstackApplicationCredentialSecret); err != nil {
+			return err
+		}
+	}
 	if spec.Username == "" {
 		if err := kuberneteshelper.ValidateSecretKeySelector(spec.CredentialsReference, resources.OpenstackUsername); err != nil {
 			return err

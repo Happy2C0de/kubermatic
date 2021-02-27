@@ -65,11 +65,13 @@ type HetznerCredentials struct {
 }
 
 type OpenstackCredentials struct {
-	Username string
-	Password string
-	Tenant   string
-	TenantID string
-	Domain   string
+	Username                    string
+	Password                    string
+	Tenant                      string
+	TenantID                    string
+	Domain                      string
+	ApplicationCredentialID     string
+	ApplicationCredentialSecret string
 }
 
 type PacketCredentials struct {
@@ -282,6 +284,18 @@ func GetOpenstackCredentials(data CredentialsData) (OpenstackCredentials, error)
 	openstackCredentials := OpenstackCredentials{}
 	var err error
 
+	if spec.ApplicationCredentialID != "" {
+		openstackCredentials.ApplicationCredentialID = spec.ApplicationCredentialID
+	} else if openstackCredentials.ApplicationCredentialID, err = data.GetGlobalSecretKeySelectorValue(spec.CredentialsReference, OpenstackApplicationCredentialID); err != nil {
+		return OpenstackCredentials{}, err
+	}
+
+	if spec.ApplicationCredentialSecret != "" {
+		openstackCredentials.ApplicationCredentialSecret = spec.ApplicationCredentialSecret
+	} else if openstackCredentials.ApplicationCredentialSecret, err = data.GetGlobalSecretKeySelectorValue(spec.CredentialsReference, OpenstackApplicationCredentialSecret); err != nil {
+		return OpenstackCredentials{}, err
+	}
+
 	if spec.Username != "" {
 		openstackCredentials.Username = spec.Username
 	} else if openstackCredentials.Username, err = data.GetGlobalSecretKeySelectorValue(spec.CredentialsReference, OpenstackUsername); err != nil {
@@ -315,6 +329,9 @@ func GetOpenstackCredentials(data CredentialsData) (OpenstackCredentials, error)
 	} else if openstackCredentials.Domain, err = data.GetGlobalSecretKeySelectorValue(spec.CredentialsReference, OpenstackDomain); err != nil {
 		return OpenstackCredentials{}, err
 	}
+
+	// ApplicationCredentials (ID/Secret) are bound to a specific project.
+	// It makes no sense to add the option to the datacenter level. Configure ApplicationCredentials via presets or via an explicit request.
 
 	return openstackCredentials, nil
 }
